@@ -14,7 +14,7 @@ import Reactive.Banana.Frameworks
 import qualified Graphics.Vty as Vty
 
 data Word
-  = Word String String
+  = Word String String | NewWord String
   deriving Show
 
 main :: IO ()
@@ -44,38 +44,32 @@ main = do
           eesc :: Event ()
           eesc = () <$ filterE (== Vty.EvKey Vty.KEsc []) eevent
 
-      let newWord :: String -> Moment (Behavior Word)
-          newWord word =
-            accumB (Word "" word)
-              ((\c w ->
-                case w of
-                  Word xs (y:ys) | c == y -> Word (y:xs) ys
-                  _ -> w) <$> echar)
+          go :: Char -> Word -> Word
+          go c (Word xs (y:ys)) | c == y = Word (y:xs) ys
+          go _ w = w
 
-      -- The current word to be typed
-      bfirstword :: Behavior Word <-
-        liftMoment (newWord "hello")
+          eenter :: Event ()
+          eenter = () <$ filterE (== Vty.EvKey Vty.KEnter []) eevent
 
-      bword :: Behavior Word <-
-        switchB bfirstword
-          (observeE (newWord "hello" <$ ecompleted))
+          edone :: Event ()
+          edone = () <$ filterE (\w -> case w of (NewWord _) -> True; _ -> False) eWord
 
-      let ecompleted :: Event ()
-          ecompleted = () <$ filterApply (wordDone <$> bword) echar
+          firstWord :: Word
+          firstWord = NewWord "hello"
 
-      -- The initial word to draw
-      currentWord :: Word <-
-        valueB bword
+          bWords :: Behavior [Word]
+          bWords = pure $ repeat (NewWord "next")
 
-      eword :: Event (Future Word) <-
-        changes bword
+      eWord :: Event Word    <- accumE  firstWord (go <$> echar)
+      bWord :: Behavior Word <- stepper firstWord eWord
+      -- accumB :: Behavior (a -> b) -> Event a -> Behavior b
 
-      liftIO (print currentWord)
+      reactimate (print <$> eWord)
+      reactimate (atomically (void $ tryPutTMVar doneVar ()) <$ eesc)
+      reactimate (print "congratulations!" <$ edone)
 
-      reactimate (putStrLn "completed!" <$ ecompleted)
-      reactimate (void (atomically (tryPutTMVar doneVar ())) <$ eesc)
-      reactimate' (fmap print <$> eword)
-      -- reactimate (print <$> echar)
+
+
 
   actuate network
 
