@@ -10,12 +10,19 @@ import Control.Monad
 import Prelude hiding (Word)
 import Reactive.Banana
 import Reactive.Banana.Frameworks
-
+import System.Random
 import qualified Graphics.Vty as Vty
 
 data Word
-  = Word String String | NewWord String
+  = Word String String
   deriving Show
+
+
+wordzzz :: [Word]
+wordzzz = (\w -> Word w "") <$> ["oink", "foo", "baz", "hobo"]
+
+randomWord :: IO Word
+randomWord = (wordzzz !!) <$> randomRIO (0, length wordzzz - 1)
 
 main :: IO ()
 main = do
@@ -29,8 +36,7 @@ main = do
   network <-
     compile $ mdo
       -- All vty events
-      eevent :: Event Vty.Event <-
-        fromAddHandler addEventHandler
+      eevent :: Event Vty.Event <- fromAddHandler addEventHandler
 
       let -- Character keypresses
           echar :: Event Char
@@ -44,32 +50,31 @@ main = do
           eesc :: Event ()
           eesc = () <$ filterE (== Vty.EvKey Vty.KEsc []) eevent
 
-          go :: Char -> Word -> Word
-          go c (Word xs (y:ys)) | c == y = Word (y:xs) ys
-          go _ w = w
+          eCorrectKeypress :: Event Bool
+          eCorrectKeypress = filterJust $ funfunfun <$> bword <@> echar
+            where
+              funfunfun :: Word -> Char -> Maybe Bool
+              funfunfun (Word (x:xs) _) y = null xs <$ guard (x == y)
+              funfunfun _ _               = Nothing
 
-          eenter :: Event ()
-          eenter = () <$ filterE (== Vty.EvKey Vty.KEnter []) eevent
+          eOldWord :: Event Word
+          eOldWord = filterJust $ fun <$> bword <@> eCorrectKeypress
+            where
+              fun :: Word -> Bool -> Maybe Word
+              fun (Word (x:xs) ys) b = if not b then Just (Word xs (x:ys)) else Nothing
+              fun _ _                = Nothing
 
-          edone :: Event ()
-          edone = () <$ filterE (\w -> case w of (NewWord _) -> True; _ -> False) eWord
+      eNewWord :: Event Word
+        <- execute . filterJust $ (\x -> liftIO randomWord <$ guard x) <$> eCorrectKeypress
 
-          firstWord :: Word
-          firstWord = NewWord "hello"
+      firstWord :: Word <- liftIO randomWord
 
-          bWords :: Behavior [Word]
-          bWords = pure $ repeat (NewWord "next")
+      bword :: Behavior Word <- stepper firstWord (unionWith undefined eNewWord eOldWord)
 
-      eWord :: Event Word    <- accumE  firstWord (go <$> echar)
-      bWord :: Behavior Word <- stepper firstWord eWord
-      -- accumB :: Behavior (a -> b) -> Event a -> Behavior b
-
-      reactimate (print <$> eWord)
+      liftIO (print firstWord)
+      reactimate ((\nw -> putStrLn $ "New Word: " ++ show nw) <$> eNewWord)
+      reactimate ((\nw -> putStrLn $ "Old Word: " ++ show nw) <$> eOldWord)
       reactimate (atomically (void $ tryPutTMVar doneVar ()) <$ eesc)
-      reactimate (print "congratulations!" <$ edone)
-
-
-
 
   actuate network
 
